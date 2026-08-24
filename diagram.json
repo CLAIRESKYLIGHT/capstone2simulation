@@ -3,39 +3,30 @@
   "author": "Angela Claire",
   "editor": "wokwi",
   "parts": [
+    { "type": "wokwi-esp32-devkit-v1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-lcd1602", "id": "lcd1", "top": -150, "left": 0, "attrs": { "pins": "i2c" } },
+    { "type": "wokwi-buzzer", "id": "bz1", "top": 150, "left": 0, "attrs": {} },
     {
-      "type": "wokwi-esp32-devkit-v1",
-      "id": "esp",
-      "top": 0,
-      "left": 0,
-      "attrs": {}
-    },
-    {
-      "type": "wokwi-lcd1602",
-      "id": "lcd1",
-      "top": -150,
-      "left": 0,
-      "attrs": { "pins": "i2c" }
-    },
-    {
-      "type": "wokwi-buzzer",
-      "id": "bz1",
-      "top": 150,
-      "left": 0,
-      "attrs": {}
+      "type": "wokwi-rgb-led",
+      "id": "led1",
+      "top": -111.2,
+      "left": -94.9,
+      "attrs": { "common": "cathode" }
     }
   ],
   "connections": [
-    ["esp:TX0", "$serialMonitor:RX", "", []],
-    ["esp:RX0", "$serialMonitor:TX", "", []],
-
-    ["esp:D21", "lcd1:SDA", "green", []],
-    ["esp:D22", "lcd1:SCL", "blue", []],
-    ["esp:5V", "lcd1:VCC", "red", []],
-    ["esp:GND.1", "lcd1:GND", "black", []],
-
-    ["esp:D12", "bz1:1", "green", []],
-    ["esp:GND.2", "bz1:2", "black", []]
+    [ "esp:TX0", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX0", "$serialMonitor:TX", "", [] ],
+    [ "esp:D21", "lcd1:SDA", "green", [] ],
+    [ "esp:D22", "lcd1:SCL", "blue", [] ],
+    [ "esp:5V", "lcd1:VCC", "red", [] ],
+    [ "esp:GND.1", "lcd1:GND", "black", [] ],
+    [ "esp:D12", "bz1:1", "green", [] ],
+    [ "esp:GND.2", "bz1:2", "black", [] ],
+    [ "esp:D25", "led1:R", "red", [] ],
+    [ "esp:D26", "led1:G", "green", [] ],
+    [ "esp:D27", "led1:B", "blue", [] ],
+    [ "esp:GND.1", "led1:COM", "black", [] ]
   ],
   "dependencies": {}
 }

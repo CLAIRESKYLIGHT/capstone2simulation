@@ -1,6 +1,6 @@
 // ============================================================
 // SMART BARANGAY SYSTEM - Household Device (Phase 2)
-// ESP32 + LCD + WiFi + NTP + BUZZER
+// ESP32 + LCD + WiFi + NTP + BUZZER + RGB LED
 // ============================================================
 
 #include <Arduino.h>
@@ -16,34 +16,68 @@
 
 // ===== PIN DEFINITIONS =====
 #define BUZZER_PIN 12
+#define LED_R 25
+#define LED_G 26
+#define LED_B 27
 
 // ===== LCD SETUP =====
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 char timeBuffer[20];
 char dateBuffer[20];
 
+// ===== LED STATE TRACKING =====
+bool greenBlinkState = false;
+unsigned long lastBlinkTime = 0;
+const unsigned long BLINK_INTERVAL = 500;
+
+// ===== FUNCTION: Set RGB LED Color =====
+void setLED(bool r, bool g, bool b) {
+  digitalWrite(LED_R, r ? HIGH : LOW);
+  digitalWrite(LED_G, g ? HIGH : LOW);
+  digitalWrite(LED_B, b ? HIGH : LOW);
+}
+
+void ledOff()     { setLED(false, false, false); }
+void ledRed()     { setLED(true,  false, false); }
+void ledGreen()   { setLED(false, true,  false); }
+void ledBlue()    { setLED(false, false, true ); }
+void ledYellow()  { setLED(true,  true,  false); }
+
+// ===== FUNCTION: Update idle blinking green LED =====
+void updateIdleLED() {
+  if (millis() - lastBlinkTime >= BLINK_INTERVAL) {
+    lastBlinkTime = millis();
+    greenBlinkState = !greenBlinkState;
+    if (greenBlinkState) {
+      ledGreen();
+    } else {
+      ledOff();
+    }
+  }
+}
+
 // ===== FUNCTION: Play Alert Sounds =====
 void playAlert(int type) {
-  if (type == 1) { // EMERGENCY ALERT - Fast beeps
+  if (type == 1) {
     for (int i = 0; i < 5; i++) {
       tone(BUZZER_PIN, 1000, 200);
       delay(300);
     }
-  } else if (type == 2) { // WARNING ALERT - Two beeps
+  } else if (type == 2) {
     for (int i = 0; i < 2; i++) {
       tone(BUZZER_PIN, 600, 300);
       delay(400);
     }
-  } else if (type == 3) { // NORMAL ALERT - Single beep
+  } else if (type == 3) {
     tone(BUZZER_PIN, 400, 200);
     delay(200);
-  } else if (type == 4) { // SUCCESS ALERT - Happy tune
+  } else if (type == 4) {
     tone(BUZZER_PIN, 523, 150);
     delay(200);
     tone(BUZZER_PIN, 659, 150);
     delay(200);
     tone(BUZZER_PIN, 784, 300);
-  } else { // DEFAULT - Short beep
+  } else {
     tone(BUZZER_PIN, 300, 100);
     delay(100);
   }
@@ -56,29 +90,34 @@ void connectWiFi() {
   lcd.print("Connecting to");
   lcd.setCursor(0, 1);
   lcd.print("WiFi...");
-  
+
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  
+
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(500);
+    ledYellow();
+    delay(250);
+    ledOff();
+    delay(250);
     attempts++;
     Serial.print(".");
   }
-  
+
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\n✅ WiFi Connected!");
     Serial.print("   IP: ");
     Serial.println(WiFi.localIP());
-    
+
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("✅ Connected!");
     lcd.setCursor(0, 1);
     lcd.print("IP: ");
     lcd.print(WiFi.localIP().toString().substring(0, 12));
-    playAlert(4); // Success tune
+    playAlert(4);
     delay(2000);
+  } else {
+    ledRed();
   }
 }
 
@@ -89,9 +128,9 @@ void getTime() {
   lcd.print("Updating Time");
   lcd.setCursor(0, 1);
   lcd.print("Please wait...");
-  
+
   configTime(UTC_OFFSET, 0, NTP_SERVER);
-  
+
   struct tm timeinfo;
   int attempts = 0;
   while (!getLocalTime(&timeinfo) && attempts < 10) {
@@ -99,10 +138,10 @@ void getTime() {
     attempts++;
     Serial.print(".");
   }
-  
+
   if (attempts < 10) {
     Serial.println("\n✅ Time Synced!");
-    playAlert(4); // Success tune
+    playAlert(4);
   }
 }
 
@@ -114,13 +153,13 @@ void displayTime() {
     lcd.print("Time Error");
     return;
   }
-  
+
   strftime(timeBuffer, sizeof(timeBuffer), "%H:%M:%S", &timeinfo);
   strftime(dateBuffer, sizeof(dateBuffer), "%d/%m/%Y", &timeinfo);
-  
+
   lcd.setCursor(0, 0);
   lcd.print(timeBuffer);
-  
+
   lcd.setCursor(0, 1);
   lcd.print(dateBuffer);
   lcd.print("   ");
@@ -128,14 +167,22 @@ void displayTime() {
 
 // ===== FUNCTION: Display Announcement with Sound =====
 void displayAnnouncement(String message, int alertType) {
-  // Play the alert sound first
+  if (alertType == 1) {
+    for (int i = 0; i < 6; i++) {
+      ledRed();
+      delay(150);
+      ledOff();
+      delay(150);
+    }
+  } else {
+    ledBlue();
+  }
+
   playAlert(alertType);
-  
-  // Display the announcement
+
   lcd.clear();
   lcd.setCursor(0, 0);
-  
-  // Show alert type
+
   if (alertType == 1) {
     lcd.print("🚨 EMERGENCY!");
   } else if (alertType == 2) {
@@ -143,14 +190,12 @@ void displayAnnouncement(String message, int alertType) {
   } else {
     lcd.print("📢 ANNOUNCEMENT");
   }
-  
+
   lcd.setCursor(0, 1);
 
-  // === Serial logging for announcements ===
   Serial.print("ANNOUNCE:");
   Serial.println(message);
-  
-  // Display message (with scrolling if long)
+
   if (message.length() > 16) {
     lcd.print(message.substring(0, 16));
     delay(1500);
@@ -161,54 +206,54 @@ void displayAnnouncement(String message, int alertType) {
     lcd.print(message);
     delay(3000);
   }
-  
+
   lcd.clear();
 }
 
-// ===== FUNCTION: Test Announcements =====
-void testAnnouncement(int type) {
-  if (type == 1) {
-    displayAnnouncement("TYPHOON ALERT: No sailing today!", 1);
-  } else if (type == 2) {
-    displayAnnouncement("HEAVY RAIN WARNING: Stay indoors", 2);
-  } else {
-    displayAnnouncement("Barangay Meeting at 5PM today", 3);
+// ===== FUNCTION: Receive announcement from gateway =====
+void handleIncomingAnnouncement() {
+  if (Serial.available()) {
+    String message = Serial.readStringUntil('\n');
+    message.trim();
+
+    if (message.length() > 0) {
+      displayAnnouncement(message, 3);
+    }
   }
 }
 
 // ===== SETUP =====
 void setup() {
   Serial.begin(115200);
+
   Serial.println("\n========================================");
   Serial.println("  SMART BARANGAY ANNOUNCEMENT SYSTEM");
-  Serial.println("  Household Device - Phase 2 (with Buzzer)");
+  Serial.println("  Household Device - Phase 2 (with Buzzer + LED)");
   Serial.println("========================================\n");
-  
-  // Initialize buzzer pin
+
   pinMode(BUZZER_PIN, OUTPUT);
-  
-  // Initialize LCD
+  pinMode(LED_R, OUTPUT);
+  pinMode(LED_G, OUTPUT);
+  pinMode(LED_B, OUTPUT);
+  ledOff();
+
   lcd.init();
   lcd.backlight();
   lcd.clear();
-  
-  // Show startup screen
+
   lcd.setCursor(0, 0);
   lcd.print("Barangay Otavi");
   lcd.setCursor(0, 1);
   lcd.print("Smart Device");
-  playAlert(4); // Startup tune
+  playAlert(4);
   delay(2000);
-  
-  // Connect to WiFi
+
   connectWiFi();
-  
-  // Get time if WiFi connected
+
   if (WiFi.status() == WL_CONNECTED) {
     getTime();
   }
-  
-  // Show ready status
+
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("✅ System Ready");
@@ -216,36 +261,15 @@ void setup() {
   lcd.print("Barangay Otavi");
   playAlert(3);
   delay(2000);
-  
+
   Serial.println("✅ System Ready!");
-  Serial.println("   Testing alerts...");
-  
-  // Show test announcements
-  testAnnouncement(1);
-  testAnnouncement(2);
-  testAnnouncement(3);
+  Serial.println("   Waiting for announcements...");
 }
 
 // ===== LOOP =====
 void loop() {
   displayTime();
-  
-  // Show a test announcement every 15 seconds
-  static unsigned long lastAnnouncement = 0;
-  static int counter = 0;
-  
-  if (millis() - lastAnnouncement > 15000) {
-    lastAnnouncement = millis();
-    counter++;
-    
-    if (counter % 3 == 1) {
-      displayAnnouncement("TYPHOON ALERT: No sailing", 1);
-    } else if (counter % 3 == 2) {
-      displayAnnouncement("HEAVY RAIN WARNING", 2);
-    } else {
-      displayAnnouncement("Barangay Meeting 5PM", 3);
-    }
-  }
-  
-  delay(1000);
+  updateIdleLED();
+  handleIncomingAnnouncement();
+  delay(100);
 }
