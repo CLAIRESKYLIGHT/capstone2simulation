@@ -3,7 +3,7 @@
 import time
 import serial
  
-PORT = "rfc2217://localhost:4000"
+PORT = "rfc2217://localhost:4001"
 LINES = [
     "1|0|3a0ade314b8bef15|Test one",
     "1|0|3a0ade314b8bef15|Test one",

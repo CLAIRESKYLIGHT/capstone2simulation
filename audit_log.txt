@@ -1,0 +1,6 @@
+2026-10-18 23:50:26 | bio | ACCOUNT_CREATED | first admin account
+2026-10-18 23:50:48 | bio | LOGIN_OK | role=admin
+2026-10-18 23:51:35 | bio | SEND | Testing the login
+2026-10-18 23:52:03 | bio | SEND | may tiripon tabi kita na hapon
+2026-10-19 00:27:18 | bio | LOGIN_OK | role=admin
+2026-10-19 00:27:39 | Bio | LOGIN_FAIL | attempt 1
