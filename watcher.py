@@ -3,99 +3,118 @@ import threading
 import time
 import os
 import asyncio
-import pyttsx3
 import pythoncom
 import edge_tts
+import pyttsx3
 from playsound import playsound
-
-SERIAL_URL = "rfc2217://localhost:4000"
-BAUD = 115200
-
-TAGALOG_VOICE = "fil-PH-BlessicaNeural"  # Filipino, female
+ 
+TAGALOG_VOICE = "fil-PH-BlessicaNeural"
 TEMP_AUDIO_FILE = "temp_announcement.mp3"
-
-def connect_with_retry(max_attempts=10, delay=1.5):
+ 
+# Seconds to wait after the households receive the packet, so their short beep finishes
+# BEFORE the voice starts. Increase it if you still hear the beep over the voice.
+VOICE_DELAY_AFTER_BEEP = 1.2
+ 
+# Offline fallback: pick a FEMALE Windows voice (names checked in this order)
+FEMALE_VOICE_HINTS = ["zira", "hazel", "susan", "heera", "catherine", "aria", "eva", "linda", "female"]
+ 
+def connect_with_retry(url, max_attempts=10, delay=1.5):
     for attempt in range(1, max_attempts + 1):
         try:
-            s = serial.serial_for_url(SERIAL_URL, baudrate=BAUD, timeout=1)
-            print("Connected to simulator.")
+            s = serial.serial_for_url(url, baudrate=115200, timeout=1)
+            print(f"Connected to {url}")
             return s
         except Exception as exc:
-            print(f"Attempt {attempt}/{max_attempts} failed: {exc}")
+            print(f"Attempt {attempt}/{max_attempts} failed for {url}: {exc}")
             time.sleep(delay)
-    raise RuntimeError("Could not connect after retries. Is the Wokwi simulation running?")
-
-# ---- shared serial connection ----
-ser = connect_with_retry()
-
-# ---- background thread: listens for ANNOUNCE: lines and speaks them ----
-def listen_loop():
+    raise RuntimeError(f"Could not connect to {url}. Is that simulation running?")
+ 
+gateway = connect_with_retry("rfc2217://localhost:4000")
+household1 = connect_with_retry("rfc2217://localhost:4001")
+household2 = connect_with_retry("rfc2217://localhost:4002")
+ 
+def pick_female_voice(engine):
+    voices = engine.getProperty("voices")
+    for hint in FEMALE_VOICE_HINTS:
+        for v in voices:
+            if hint in (v.name or "").lower():
+                return v
+    return None
+ 
+ 
+def speak_offline_female(text):
+    engine = pyttsx3.init()
+    voice = pick_female_voice(engine)
+    if voice is not None:
+        engine.setProperty("voice", voice.id)
+        print(f"[TTS] Offline voice: {voice.name}")
+    else:
+        print("[TTS] WARNING: no female offline voice found; using the default voice.")
+    engine.setProperty("rate", 170)
+    engine.say(text)
+    engine.runAndWait()
+    engine.stop()
+ 
+ 
+def speak(text):
+    """Filipino female voice (online). If that fails, a female offline voice."""
+    print(f"[TTS] Attempting to speak: {text}")
     pythoncom.CoInitialize()
-
-    async def _generate_tagalog(text, filename):
-        communicate = edge_tts.Communicate(text, TAGALOG_VOICE)
-        await communicate.save(filename)
-
-    def speak_tagalog(text):
-        """Try online Tagalog female voice first."""
-        asyncio.run(_generate_tagalog(text, TEMP_AUDIO_FILE))
-        playsound(TEMP_AUDIO_FILE)
-        os.remove(TEMP_AUDIO_FILE)
-
-    def speak_fallback(text):
-        """Offline English fallback if no internet."""
-        engine = pyttsx3.init()
-        engine.setProperty("rate", 150)
-        engine.say(text)
-        engine.runAndWait()
-        engine.stop()
-        del engine
-
-    def speak(text):
-        text = (text or "").strip()
-        if not text:
-            return
-        print(f"Speaking: {text}")
-        try:
-            speak_tagalog(text)
-        except Exception as exc:
-            print(f"Tagalog TTS failed ({exc}), falling back to offline voice...")
-            try:
-                speak_fallback(text)
-            except Exception as exc2:
-                print(f"TTS error: {exc2}")
-
-    buffer = ""
     try:
-        while True:
-            data = ser.read(1)
-            if not data:
-                time.sleep(0.02)
-                continue
-            buffer += data.decode(errors="ignore")
-            if "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                line = line.strip()
-                if line.startswith("ANNOUNCE:"):
-                    text = line.replace("ANNOUNCE:", "", 1).strip()
-                    speak(text)
+        asyncio.run(_speak_tagalog(text))
+        print("[TTS] Tagalog voice succeeded.")
     except Exception as exc:
-        print(f"Serial/listener error: {exc}")
+        print(f"[TTS] Tagalog voice failed: {exc}")
+        print("[TTS] Using the offline female voice (it reads Tagalog with an English accent).")
+        try:
+            speak_offline_female(text)
+        except Exception as exc2:
+            print(f"[TTS] Offline voice also failed: {exc2}")
     finally:
         pythoncom.CoUninitialize()
-
-# ---- main thread: type announcements, send them ----
-def send_loop():
-    print("Gateway + Voice ready. Type an announcement and press Enter.")
+ 
+async def _speak_tagalog(text):
+    # rate="+20%" speaks noticeably faster, shortening total playback duration
+    communicate = edge_tts.Communicate(text, TAGALOG_VOICE, rate="+20%")
+    await communicate.save(TEMP_AUDIO_FILE)
+    print(f"[TTS] Audio file saved: {TEMP_AUDIO_FILE}")
+    playsound(TEMP_AUDIO_FILE)
+    print("[TTS] playsound() finished.")
+    os.remove(TEMP_AUDIO_FILE)
+ 
+def relay_loop():
+    buffer = ""
+    while True:
+        data = gateway.read(1)
+        if not data:
+            time.sleep(0.02)
+            continue
+        buffer += data.decode(errors="ignore")
+        if "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+            line = line.strip()
+            if line.startswith("ANNOUNCE:"):
+                packet = line.replace("ANNOUNCE:", "", 1).strip()
+                # packet format: sequence|hmac|message
+                parts = packet.split("|", 2)
+                if len(parts) == 3:
+                    plain_message = parts[2]
+                else:
+                    plain_message = packet  # fallback if format is unexpected
+ 
+                print(f"Relaying (authenticated) to households: {plain_message}")
+                household1.write((packet + "\n").encode())
+                household2.write((packet + "\n").encode())
+                time.sleep(VOICE_DELAY_AFTER_BEEP)   # let the beep finish first
+                speak(plain_message)
+                
+def type_loop():
+    print("Type an announcement to send via Gateway.")
     while True:
         text = input("Announcement: ").strip()
         if text.lower() in ("exit", "quit"):
             break
-        ser.write((text + "\n").encode("utf-8"))
-        print(f"Sent: {text}")
-
-if __name__ == "__main__":
-    listener = threading.Thread(target=listen_loop, daemon=True)
-    listener.start()
-    send_loop()
-    ser.close()
+        gateway.write((text + "\n").encode())
+ 
+threading.Thread(target=relay_loop, daemon=True).start()
+type_loop()
